@@ -6,6 +6,7 @@ using HCI.AiAssistant.API.Models.DTOs;
 using Newtonsoft.Json;
 using Microsoft.Azure.Devices;
 using System.Text;
+using Microsoft.Extensions.Caching.Memory;
 
 namespace HCI.AiAssistant.API.Controllers;
 
@@ -17,18 +18,38 @@ public class AIAssistantController : ControllerBase
     private readonly IAppConfigurationsService _appConfigurationsService;
     private readonly IAIAssistantService _aIAssistantService;
     private readonly IParametricFunctions _parametricFunctions;
+    private readonly IMemoryCache _memoryCache;
 
     public AIAssistantController(
         ISecretsService secretsService,
         IAppConfigurationsService appConfigurationsService,
         IAIAssistantService aIAssistantService,
-        IParametricFunctions parametricFunctions
+        IParametricFunctions parametricFunctions,
+        IMemoryCache memoryCache
     )
     {
         _secretsService = secretsService;
         _appConfigurationsService = appConfigurationsService;
         _aIAssistantService = aIAssistantService;
         _parametricFunctions = parametricFunctions;
+        _memoryCache = memoryCache;
+    }
+
+    [HttpGet("start-quiz")]
+    public IActionResult StartQuiz()
+    {
+        var questions = _appConfigurationsService.Questions ?? Array.Empty<string>();
+        if (questions.Length == 0)
+            return BadRequest("No questions available in configuration.");
+
+        var rnd = new Random();
+        var q = questions[rnd.Next(questions.Length)];
+        var currentQuestion = q.Split('→')[0].Trim();
+
+        var sessionId = Guid.NewGuid().ToString();
+        _memoryCache.Set(sessionId, currentQuestion, TimeSpan.FromMinutes(30));
+
+        return Ok(new { question = currentQuestion, sessionId = sessionId });
     }
 
     [HttpPost("message")]
@@ -47,7 +68,32 @@ public class AIAssistantController : ControllerBase
                 }
             );
         }
-        string messageToSendToAssistant = "Instruction: " + _appConfigurationsService.Instruction + "\nMessage: " + request.TextMessage;
+
+        if (string.IsNullOrEmpty(request.SessionId))
+        {
+            return BadRequest(new ErrorResponseDTO()
+            {
+                TextErrorTitle = "MissingSessionId",
+                TextErrorMessage = "SessionId is required. Call /start-quiz first.",
+                TextErrorTrace = _parametricFunctions.GetCallerTrace()
+            });
+        }
+
+        if (!_memoryCache.TryGetValue(request.SessionId, out string? currentQuestion) || currentQuestion == null)
+        {
+            return BadRequest(new ErrorResponseDTO()
+            {
+                TextErrorTitle = "NoActiveQuestion",
+                TextErrorMessage = "No active question found. Call /start-quiz first or session expired.",
+                TextErrorTrace = _parametricFunctions.GetCallerTrace()
+            });
+        }
+
+        var instruction = _appConfigurationsService.Instruction;
+
+        var messageToSendToAssistant =
+            $"Instruction: {instruction}\n" +
+            $"Message:\nQuestion: {currentQuestion}\nAnswer: {request.TextMessage}";
 
 #pragma warning disable CS8604
         string textMessageResponse = await _aIAssistantService.SendMessageAndGetResponseAsync(messageToSendToAssistant);

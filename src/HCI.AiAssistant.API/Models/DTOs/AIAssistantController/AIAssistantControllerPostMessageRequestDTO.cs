@@ -8,4 +8,5 @@ namespace HCI.AiAssistant.API.Models.DTOs.AIAssistantController;
 public class AIAssistantControllerPostMessageRequestDTO
 {
     public string? TextMessage { get; set; }
+    public string? SessionId { get; set; }
 }

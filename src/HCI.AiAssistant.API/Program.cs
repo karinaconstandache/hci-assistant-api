@@ -52,6 +52,8 @@ provider => provider.GetRequiredService<IOptions<AppConfigurationsService>>().Va
 builder.Services.AddSingleton<IParametricFunctions, ParametricFunctions>();
 builder.Services.AddSingleton<IAIAssistantService, AIAssistantService>();
 
+builder.Services.AddMemoryCache();
+
 builder.Services.AddControllers();
 // Learn more about configuring Swagger/OpenAPI at https://aka.ms/aspnetcore/swashbuckle
 builder.Services.AddEndpointsApiExplorer();
